@@ -55,3 +55,7 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# local files
+*.swp
+*.DS_Store
