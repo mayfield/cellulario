@@ -6,7 +6,6 @@ _*Cellular IO - A self-contained and self-managed IO loop*_
 [![Maturity](https://img.shields.io/pypi/status/cellulario.svg)](https://pypi.python.org/pypi/cellulario)
 [![License](https://img.shields.io/pypi/l/cellulario.svg)](https://pypi.python.org/pypi/cellulario)
 [![Change Log](https://img.shields.io/badge/change-log-blue.svg)](https://github.com/mayfield/cellulario/blob/master/CHANGELOG.md)
-[![Build Status](https://semaphoreci.com/api/v1/projects/a1b17c52-185a-4cc6-ad28-d7f5883bca42/533645/shields_badge.svg)](https://semaphoreci.com/mayfield/cellulario)
 [![Build Status](https://semaphoreci.com/api/v1/projects/3a285086-d1cf-4585-97ec-6b96e707b0c9/595977/shields_badge.svg)](https://semaphoreci.com/mayfield/cellulario)
 [![Version](https://img.shields.io/pypi/v/cellulario.svg)](https://pypi.python.org/pypi/cellulario)
 
