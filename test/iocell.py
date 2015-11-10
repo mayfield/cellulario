@@ -92,6 +92,28 @@ class TestIOCellWithFinal(unittest.TestCase):
         cell.add_tier(f2, source=t)
         self.assertEqual(list(cell), [-123, 124, -321, 322])
 
+    def test_multi_emitter_multi_source(self):
+        cell = IOCell()
+
+        @self.tier_decor()
+        def a1(tier):
+            tier.emit('a1-1')
+            tier.emit('a1-2')
+        a1t = cell.add_tier(a1)
+
+        @self.tier_decor()
+        def a2(tier):
+            tier.emit('a2-1')
+            tier.emit('a2-2')
+        a2t = cell.add_tier(a2)
+
+        @self.tier_decor()
+        def b(tier, value):
+            tier.emit(value)
+        cell.add_tier(b, source=[a1t, a2t])
+
+        self.assertEqual(list(cell), ['a1-1', 'a1-2', 'a2-1', 'a2-2'])
+
 
 class TestIOCellWithFinalCoro(TestIOCellWithFinal):
 
