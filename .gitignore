@@ -59,3 +59,4 @@ target/
 # local files
 *.swp
 *.DS_Store
+.cscope_db

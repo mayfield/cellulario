@@ -32,6 +32,6 @@ class LatencyCellCoordinator(CellCoordinator):
 
 
 coordinators = {
-    LatencyCellCoordinator,
-    FiFoCellCoordinator
+    LatencyCellCoordinator.name: LatencyCellCoordinator,
+    FiFoCellCoordinator.name: FiFoCellCoordinator
 }
