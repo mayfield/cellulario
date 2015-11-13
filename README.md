@@ -15,7 +15,7 @@ About
 Cellular IO is an interface for IO loop style programming that bundles the IOloop
 lifecycle into the inner cell of a standard python data interface.  If the cell
 is used like a generator then the ioloop is managed inside the generator during
-calls to __next__.  If callbacks are used then the cell will block the current
+calls to `__next__`.  If callbacks are used then the cell will block the current
 execution context until the sum of IO routines are complete.
 
 An IOCell can consist of multiple levels of cascading IO routines.  A first tier

@@ -19,6 +19,7 @@ class TestIOCellNoFinal(unittest.TestCase):
     def test_one_tier_no_emit(self):
         cell = IOCell()
         refcnt = 0
+        @asyncio.coroutine
         def f(tier):
             nonlocal refcnt
             refcnt += 1
@@ -29,9 +30,11 @@ class TestIOCellNoFinal(unittest.TestCase):
     def test_cascaded_tiers_no_emit(self):
         cell = IOCell()
         refcnt = 0
+        @asyncio.coroutine
         def f(tier):
             nonlocal refcnt
             refcnt += 1
+        @asyncio.coroutine
         def f2(tier):
             nonlocal refcnt
             refcnt += 1
@@ -42,8 +45,10 @@ class TestIOCellNoFinal(unittest.TestCase):
 
     def test_cascaded_tiers(self):
         cell = IOCell()
+        @asyncio.coroutine
         def f(tier):
-            tier.emit(123)
+            yield from tier.emit(123)
+        @asyncio.coroutine
         def f2(tier, foo):
             self.assertEqual(foo, 123)
         t1 = cell.add_tier(f)
@@ -53,17 +58,14 @@ class TestIOCellNoFinal(unittest.TestCase):
 
 class TestIOCellWithFinal(unittest.TestCase):
 
-    def tier_decor(self):
-        return lambda fn: fn
-
     def test_single_final(self):
         cell = IOCell()
         refcnt = 0
-        @self.tier_decor()
+        @asyncio.coroutine
         def f(tier):
             nonlocal refcnt
             refcnt += 1
-            tier.emit(123)
+            yield from tier.emit(123)
         cell.add_tier(f)
         results = list(cell)
         self.assertEqual(refcnt, 1)
@@ -71,64 +73,55 @@ class TestIOCellWithFinal(unittest.TestCase):
 
     def test_multi_emitter_1level(self):
         cell = IOCell()
-        @self.tier_decor()
+        @asyncio.coroutine
         def f(tier):
-            tier.emit(123)
-            tier.emit(321)
+            yield from tier.emit(123)
+            yield from tier.emit(321)
         cell.add_tier(f)
         self.assertEqual(list(cell), [123, 321])
 
     def test_multi_emitter_2level(self):
         cell = IOCell()
-        @self.tier_decor()
+        @asyncio.coroutine
         def f(tier):
-            tier.emit(123)
-            tier.emit(321)
+            yield from tier.emit(123)
+            yield from tier.emit(321)
         t = cell.add_tier(f)
-        @self.tier_decor()
+        @asyncio.coroutine
         def f2(tier, number):
-            tier.emit(-number)
-            tier.emit(number + 1)
+            yield from tier.emit(-number)
+            yield from tier.emit(number + 1)
         cell.add_tier(f2, source=t)
         self.assertEqual(list(cell), [-123, 124, -321, 322])
 
     def test_multi_emitter_multi_source(self):
         cell = IOCell()
 
-        @self.tier_decor()
+        @asyncio.coroutine
         def a1(tier):
-            tier.emit('a1-1')
-            tier.emit('a1-2')
+            yield from tier.emit('a1-1')
+            yield from tier.emit('a1-2')
         a1t = cell.add_tier(a1)
 
-        @self.tier_decor()
+        @asyncio.coroutine
         def a2(tier):
-            tier.emit('a2-1')
-            tier.emit('a2-2')
+            yield from tier.emit('a2-1')
+            yield from tier.emit('a2-2')
         a2t = cell.add_tier(a2)
 
-        @self.tier_decor()
+        @asyncio.coroutine
         def b(tier, value):
-            tier.emit(value)
+            yield from tier.emit(value)
         cell.add_tier(b, source=[a1t, a2t])
 
         self.assertEqual(list(cell), ['a1-1', 'a1-2', 'a2-1', 'a2-2'])
 
 
-class TestIOCellWithFinalCoro(TestIOCellWithFinal):
-
-    def tier_decor(self):
-        return asyncio.coroutine
-
-
 class TestIOCellExceptions(unittest.TestCase):
-
-    def tier_decor(self):
-        return lambda fn: fn
 
     def test_blowup(self):
         cell = IOCell()
-        @self.tier_decor()
+        @asyncio.coroutine
         def f(tier):
             raise RuntimeError()
         cell.add_tier(f)
@@ -136,23 +129,17 @@ class TestIOCellExceptions(unittest.TestCase):
 
     def test_multi_blowup(self):
         cell = IOCell()
-        @self.tier_decor()
+        @asyncio.coroutine
         def f(tier):
             raise RuntimeError()
         cell.add_tier(f)
-        @self.tier_decor()
+        @asyncio.coroutine
         def f2(tier):
             raise ValueError()
         cell.add_tier(f2)
         it = iter(cell)
         self.assertRaises(RuntimeError, next, it)
         self.assertRaises(StopIteration, next, it)  # The value error is just dropped.
-
-
-class TestIOCellExceptionsCoro(TestIOCellExceptions):
-
-    def tier_decor(self):
-        return asyncio.coroutine
 
 
 class TestIOCellCoroBasics(unittest.TestCase):
@@ -165,6 +152,50 @@ class TestIOCellCoroBasics(unittest.TestCase):
         cell = IOCell()
         @asyncio.coroutine
         def coro(tier):
-            tier.emit((yield from self.add(2, 3)))
+            yield from tier.emit((yield from self.add(2, 3)))
         cell.add_tier(coro)
         self.assertEqual(list(cell), [5])
+
+
+class TestIOCellShortPatterns(unittest.TestCase):
+
+    def test_one_tier_no_emit(self):
+        cell = IOCell()
+        refcnt = 0
+        @cell.tier()
+        @asyncio.coroutine
+        def f(tier):
+            nonlocal refcnt
+            refcnt += 1
+        self.assertFalse(list(cell))
+        self.assertEqual(refcnt, 1)
+
+    def test_cascaded_tiers_no_emit_tier_deco(self):
+        cell = IOCell()
+        refcnt = 0
+        @cell.tier()
+        @asyncio.coroutine
+        def f(tier):
+            nonlocal refcnt
+            refcnt += 1
+        @cell.tier(source=f)
+        @asyncio.coroutine
+        def f2(tier):
+            nonlocal refcnt
+            refcnt += 1
+        self.assertFalse(list(cell))
+        self.assertEqual(refcnt, 1)
+
+    def test_cascaded_tiers_no_emit_tier_coro_deco(self):
+        cell = IOCell()
+        refcnt = 0
+        @cell.tier_coroutine()
+        def f(tier):
+            nonlocal refcnt
+            refcnt += 1
+        @cell.tier_coroutine(source=f)
+        def f2(tier):
+            nonlocal refcnt
+            refcnt += 1
+        self.assertFalse(list(cell))
+        self.assertEqual(refcnt, 1)
