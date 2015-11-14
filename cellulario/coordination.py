@@ -4,7 +4,6 @@ Coordinators.
 
 import asyncio
 import logging
-import warnings
 
 logger = logging.getLogger('cio.coord')
 
@@ -20,6 +19,12 @@ class CellCoordinator(object):
 
     def setup(self, tiers):
         """ Runs during IOCell.finalize. """
+        pass
+
+    @asyncio.coroutine
+    def enqueue(self, tier):
+        """ Subclasses should pause here to prevent enqueuing more work.  Note
+        that this means the source tier is the code to be blocked by this. """
         pass
 
     @asyncio.coroutine
@@ -43,24 +48,28 @@ class PoolCellCoordinator(CellCoordinator):
     def setup(self, tiers):
         self.pools = {}
         for tier in tiers:
-            if not tier.spec or 'pool_size' not in tier.spec:
-                warnings.warn('Tier without spec["pool_size"], defaulting to '
-                              'size 1: %s' % tier)
-                size = 1
+            size = tier.spec.get('pool_size')
+            if size is None:
+                continue
+            elif size == 0:
+                raise ValueError('Pool size of 0 is invalid: %s' % tier)
             else:
-                size = tier.spec['pool_size']
-            self.pools[tier] = asyncio.Semaphore(size)
+                self.pools[tier] = asyncio.Semaphore(size)
 
     @asyncio.coroutine
     def enter(self, tier):
-        sem = self.pools[tier]
+        sem = self.pools.get(tier)
+        if sem is None:
+            return
         logger.debug("Waiting for pool availability: %s" % sem)
         yield from sem.acquire()
         logger.debug("Acquired pool availability: %s" % sem)
 
     @asyncio.coroutine
     def exit(self, tier):
-        sem = self.pools[tier]
+        sem = self.pools.get(tier)
+        if sem is None:
+            return
         logger.debug("Releasing pool resource: %s" % sem)
         sem.release()
 

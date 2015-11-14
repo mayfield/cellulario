@@ -65,7 +65,7 @@ class IOCell(object):
     def done(self):
         return not self.refcnt
 
-    def add_tier(self, coro, source=None, spec=None):
+    def add_tier(self, coro, source=None, **spec):
         """ Add a coroutine to the cell as a task tier.  The source can be a
         single value or a list of either `TaskTier` types or coroutine
         functions already added to a `TaskTier` via `add_tier`. """
@@ -136,8 +136,10 @@ class IOCell(object):
             else:
                 self.pending_exception = exc
                 self.loop.stop()
+        elif self.loop_exception_handler_save:
+            return self.loop_exception_handler_save(loop, context)
         else:
-            return self.loop_exception_handler_save(context)
+            return self.loop.default_exception_handler(context)
 
     def run_loop(self):
         loop = self.loop
@@ -153,7 +155,7 @@ class IOCell(object):
         """ Produce a classic generator for this cell's final results. """
         self.finalize()
         for x in self.starters:
-            self.loop.create_task(x())
+            self.loop.create_task(x.enqueue_task())
         while True:
             if self.pending_exception:
                 exc = self.pending_exception
