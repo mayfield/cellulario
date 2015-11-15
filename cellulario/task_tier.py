@@ -3,9 +3,6 @@ Task tier.
 """
 
 import asyncio
-import logging
-
-logger = logging.getLogger("cio.tier")
 
 
 class TaskTier(object):
@@ -42,8 +39,6 @@ class TaskTier(object):
 
     @asyncio.coroutine
     def _enqueue_task(self, *args, **kwargs):
-        logger.info("ENQUEUE (backlog: %d): %s" % (self.backlog, self))
-        logger.debug("                args: %s, %s" % (args, kwargs))
         self.backlog += 1
         yield from self.cell.coord.enqueue(self)
         self.loop.create_task(self.coord_wrap(*args, **kwargs))
@@ -51,14 +46,10 @@ class TaskTier(object):
     @asyncio.coroutine
     def coord_wrap(self, *args, **kwargs):
         """ Wrap the coroutine with coordination throttles. """
-        logger.debug('Wait on coordinator "enter": %s' % self)
         yield from self.cell.coord.enter(self)
-        logger.debug('Acquired coordinator "enter": %s' % self)
         self.backlog -= 1
         yield from self.coro(self, *args, **kwargs)
-        logger.debug('Wait on coordinator "exit": %s' % self)
         yield from self.cell.coord.exit(self)
-        logger.debug('Acquired coordinator "exit": %s' % self)
         self.cell.decref()
 
     @asyncio.coroutine
@@ -66,8 +57,6 @@ class TaskTier(object):
         """ Send data to the next tier(s).   This call be delayed if the
         coordinator thinks the backlog is too high for any of the emit
         targets. """
-        logger.info("EMIT from: %s" % self)
-        logger.debug("     args: %s, %s" % (args, kwargs))
         for t in self.emit_targets:
             yield from t.enqueue_task(*args, **kwargs)
 
@@ -78,5 +67,4 @@ class TaskTier(object):
 
     def add_emit_target(self, tier):
         """ Run a callback when this tier emits data. """
-        logger.info("ADD EMIT TARGET: %s -> %s" % (self, tier))
         self.emit_targets.append(tier)

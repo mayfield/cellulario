@@ -5,10 +5,7 @@ alterations we make to API calls, such as filtering by router ids.
 
 import asyncio
 import collections
-import logging
 from . import coordination, task_tier
-
-logger = logging.getLogger('cio.cell')
 
 
 class IOCell(object):
@@ -32,9 +29,8 @@ class IOCell(object):
 
     TaskTier = task_tier.TaskTier
 
-    def __init__(self, coord='noop', loop=None, debug=True):
+    def __init__(self, coord='noop', loop=None):
         self.loop = loop or asyncio.get_event_loop()
-        self.loop.set_debug(debug) # XXX
         if isinstance(coord, coordination.CellCoordinator):
             self.coord = coord
         else:
@@ -53,12 +49,10 @@ class IOCell(object):
     def incref(self):
         """ Used by TaskTier to indicate pending work. """
         self.refcnt += 1
-        logger.debug("INCREF: %d" % self.refcnt)
 
     def decref(self):
         """ Used by TaskTier to indicate completed work. """
         self.refcnt -= 1
-        logger.debug("DECREF: %d" % self.refcnt)
         if not self.refcnt or self.output_buffer:
             self.loop.stop()
 
@@ -124,16 +118,12 @@ class IOCell(object):
             arg = args[0] if len(args) == 1 else args
         else:
             arg = kwargs if not args else args, kwargs
-        logger.debug("OUTPUT: %s" % arg)
         self.output_buffer.append(arg)
 
     def loop_exception_handler(self, loop, context):
         exc = context.get('exception')
         if exc:
-            if self.pending_exception:
-                logger.debug("IGNORING N+1 EXCEPTION: %s(%s)" % (
-                             type(exc).__name__, exc))
-            else:
+            if not self.pending_exception:
                 self.pending_exception = exc
                 self.loop.stop()
         elif self.loop_exception_handler_save:

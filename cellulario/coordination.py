@@ -3,9 +3,6 @@ Coordinators.
 """
 
 import asyncio
-import logging
-
-logger = logging.getLogger('cio.coord')
 
 
 class CellCoordinator(object):
@@ -61,16 +58,13 @@ class PoolCellCoordinator(CellCoordinator):
         sem = self.pools.get(tier)
         if sem is None:
             return
-        logger.debug("Waiting for pool availability: %s" % sem)
         yield from sem.acquire()
-        logger.debug("Acquired pool availability: %s" % sem)
 
     @asyncio.coroutine
     def exit(self, tier):
         sem = self.pools.get(tier)
         if sem is None:
             return
-        logger.debug("Releasing pool resource: %s" % sem)
         sem.release()
 
 
