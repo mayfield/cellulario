@@ -14,6 +14,11 @@ class CellCoordinator(object):
 
     name = 'noop'
 
+    def reset(self):
+        """ Reset any state created by setup() so the coordinator can do a
+        fresh run on a possibly different set of tiers. """
+        pass
+
     def setup(self, tiers):
         """ Runs during IOCell.finalize. """
         pass
@@ -42,8 +47,15 @@ class PoolCellCoordinator(CellCoordinator):
 
     name = 'pool'
 
-    def setup(self, tiers):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.pools = {}
+
+    def reset(self):
+        self.pools.clear()
+        super().reset()
+
+    def setup(self, tiers):
         for tier in tiers:
             size = tier.spec.get('pool_size')
             if size is None:
@@ -68,13 +80,7 @@ class PoolCellCoordinator(CellCoordinator):
         sem.release()
 
 
-class LatencyCellCoordinator(CellCoordinator):
-
-    name = 'latency'
-
-
 coordinators = {
-    LatencyCellCoordinator.name: LatencyCellCoordinator,
     PoolCellCoordinator.name: PoolCellCoordinator,
     CellCoordinator.name: CellCoordinator
 }

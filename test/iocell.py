@@ -3,14 +3,16 @@ AsyncIOGenerator tests.
 """
 
 import asyncio
-import logging
 import unittest
-from cellulario import IOCell
+from cellulario import IOCell as _IOCell
+from unittest import mock
 
-logging.basicConfig(level=0)
+
+def IOCell(*args, debug=True, **kwargs):
+    return _IOCell(*args, debug=debug, **kwargs)
 
 
-class TestIOCellNoFinal(unittest.TestCase):
+class NoFinal(unittest.TestCase):
 
     def test_init(self):
         cell = IOCell()
@@ -56,7 +58,7 @@ class TestIOCellNoFinal(unittest.TestCase):
         self.assertFalse(list(cell))
 
 
-class TestIOCellWithFinal(unittest.TestCase):
+class WithFinal(unittest.TestCase):
 
     def test_single_final(self):
         cell = IOCell()
@@ -117,7 +119,7 @@ class TestIOCellWithFinal(unittest.TestCase):
         self.assertEqual(list(cell), ['a1-1', 'a1-2', 'a2-1', 'a2-2'])
 
 
-class TestIOCellExceptions(unittest.TestCase):
+class Exceptions(unittest.TestCase):
 
     def test_blowup(self):
         cell = IOCell()
@@ -142,7 +144,7 @@ class TestIOCellExceptions(unittest.TestCase):
         self.assertRaises(StopIteration, next, it)  # The value error is just dropped.
 
 
-class TestIOCellCoroBasics(unittest.TestCase):
+class CoroBasics(unittest.TestCase):
 
     @asyncio.coroutine
     def add(self, *args):
@@ -157,7 +159,7 @@ class TestIOCellCoroBasics(unittest.TestCase):
         self.assertEqual(list(cell), [5])
 
 
-class TestIOCellShortPatterns(unittest.TestCase):
+class ShortPatterns(unittest.TestCase):
 
     def test_one_tier_no_emit(self):
         cell = IOCell()
@@ -199,3 +201,130 @@ class TestIOCellShortPatterns(unittest.TestCase):
             refcnt += 1
         self.assertFalse(list(cell))
         self.assertEqual(refcnt, 1)
+
+
+class Nesting(unittest.TestCase):
+
+    def test_from_cell_generator(self):
+        inner = IOCell()
+        @inner.tier_coroutine()
+        def inner_tier(tier):
+            for i in range(3):
+                yield from tier.emit(i)
+        outer = IOCell()
+        @outer.tier_coroutine()
+        def outer_tier(tier):
+            yield from asyncio.sleep(0)
+            inner_it = iter(inner)
+            for i in range(3):
+                self.assertEqual(i, next(inner_it))
+        list(outer)
+
+
+class Misuse(unittest.TestCase):
+
+    def test_uncalled_tier_decor(self):
+        cell = IOCell()
+        def setup():
+            @cell.tier
+            def fn(tier):
+                pass
+        self.assertRaises(TypeError, setup)
+
+    def test_uncalled_tier_coro_decor(self):
+        cell = IOCell()
+        def setup():
+            @cell.tier_coroutine
+            def fn(tier):
+                pass
+        self.assertRaises(TypeError, setup)
+
+    def test_miscycle_reset(self):
+        cell = IOCell()
+        @cell.tier_coroutine()
+        def fn(tier):
+            for i in range(3):
+                yield from tier.emit(i)
+        it = iter(cell)
+        next(it)
+        self.assertRaises(RuntimeError, cell.reset)
+
+
+class LifeCycle(unittest.TestCase):
+
+    def test_no_reuse(self):
+        cell = IOCell()
+        list(cell)
+        self.assertRaises(RuntimeError, list, cell)
+
+    def test_reuse_after_reset(self):
+        cell = IOCell()
+        @cell.tier_coroutine()
+        def coro(tier):
+            for i in range(3):
+                yield from tier.emit(i)
+        self.assertEqual(list(cell), list(range(3)))
+        cell.reset()
+        self.assertEqual(list(cell), list(range(3)))
+
+    def test_trailing_work(self):
+        cell = IOCell()
+        fullrun = False
+        @cell.tier_coroutine()
+        def coro(tier):
+            nonlocal fullrun
+            for i in range(3):
+                yield from tier.emit(i)
+            for ii in range(3):
+                yield from asyncio.sleep(0)
+            fullrun = True
+        self.assertEqual(list(cell), list(range(3)))
+        self.assertTrue(fullrun)
+
+    def test_background_work_clean_exit(self):
+        cell = IOCell()
+        loop = cell.loop
+        cancel = mock.Mock()
+        @asyncio.coroutine
+        def bg():
+            yield from asyncio.sleep(1e300)
+        @cell.tier_coroutine()
+        def coro(tier):
+            task = loop.create_task(bg())
+            task.cancel = cancel
+        self.assertEqual(list(cell), [])
+        self.assertTrue(cancel.called)
+
+    def test_background_work_exception(self):
+        cell = IOCell()
+        loop = cell.loop
+        cancel = mock.Mock()
+        @asyncio.coroutine
+        def bg():
+            yield from asyncio.sleep(1e300)
+        @cell.tier_coroutine()
+        def coro(tier):
+            task = loop.create_task(bg())
+            task.cancel = cancel
+            raise Exception()
+        self.assertRaises(Exception, list, cell)
+        self.assertTrue(cancel.called)
+
+    def test_background_work_gc(self):
+        cell = IOCell()
+        loop = cell.loop
+        cancel = mock.Mock()
+        @asyncio.coroutine
+        def bg():
+            yield from asyncio.sleep(1e300)
+        @cell.tier_coroutine()
+        def coro(tier):
+            task = loop.create_task(bg())
+            task.cancel = cancel
+            for i in range(10):
+                yield from tier.emit(i)
+        l = iter(cell)
+        next(l)
+        self.assertFalse(cancel.called)
+        del l
+        self.assertTrue(cancel.called)

@@ -19,7 +19,6 @@ class TaskTier(object):
     def __init__(self, cell, coro, spec=None):
         self.cell = cell
         self.emit_targets = []
-        self.loop = cell.loop
         self.coro = coro
         self.spec = spec
         self.backlog = 0
@@ -41,7 +40,7 @@ class TaskTier(object):
     def _enqueue_task(self, *args, **kwargs):
         self.backlog += 1
         yield from self.cell.coord.enqueue(self)
-        self.loop.create_task(self.coord_wrap(*args, **kwargs))
+        self.cell.loop.create_task(self.coord_wrap(*args, **kwargs))
 
     @asyncio.coroutine
     def coord_wrap(self, *args, **kwargs):

@@ -12,17 +12,7 @@ from cellulario.coordination import CellCoordinator
 logging.basicConfig(level=0)
 
 
-class CoordTestBase(unittest.TestCase):
-
-    def setUp(self):
-        self.loop = asyncio.new_event_loop()
-        self.loop.set_debug(True)
-
-    def tearDown(self):
-        self.loop.close()
-
-
-class InterfaceTests(CoordTestBase):
+class InterfaceTests(unittest.TestCase):
 
     def test_enter_exit_bookends(self):
         states = {}
@@ -35,7 +25,7 @@ class InterfaceTests(CoordTestBase):
             def exit(self, tier):
                 states['exit'] = time.time()
                 super().exit(tier)
-        cell = IOCell(loop=self.loop, coord=Coord())
+        cell = IOCell(coord=Coord(), debug=True)
         @cell.tier_coroutine()
         def t(tier):
             states['proc'] = time.time()
