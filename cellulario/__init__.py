@@ -19,4 +19,4 @@ if platform.python_version() <= '3.5.0':
 
 from .iocell import *
 from .coordination import *
-from .task_tier import *
+from .tier import *

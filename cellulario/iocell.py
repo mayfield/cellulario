@@ -5,8 +5,9 @@ alterations we make to API calls, such as filtering by router ids.
 
 import asyncio
 import collections
+import threading
 import warnings
-from . import coordination, task_tier
+from . import coordination, tier
 
 
 class IOCellEventLoopPolicy(type(asyncio.get_event_loop_policy())):
@@ -48,62 +49,67 @@ class IOCell(object):
     The tasks may be used to to cause further activity on the output stream.
     That is, the initial work orders may be tasks used to seed more work.
 
-    Think of this as a portable io loop that's wrapped up and managed for the
+    Think of this as a portable IO loop that's wrapped up and managed for the
     context of a single generator to the outside world.  The calling code
     will work in a normal blocking fashion (more or less). """
 
-    TaskTier = task_tier.TaskTier
+    TaskTier = tier.Tier
 
     def __init__(self, coord='noop', debug=True):
-        if isinstance(coord, coordination.CellCoordinator):
+        if isinstance(coord, coordination.AbstractCellCoordinator):
             self.coord = coord
         else:
             self.coord = self.make_coord(coord)
         self.debug = debug
         self.output_buffer = collections.deque()
         self.pending_exception = None
+        self.closed = False
         self.tiers = []
         self.tiers_coro_map = {}
-        self.loop = None
-        self.reset()
+        self.cleaners = []
+        self.finalized = False
+        self.init_event_loop()
 
     def init_event_loop(self):
         """ Every cell should have its own ioloop for proper containment.
         The type of event loop is not so important however. """
         self.loop = asyncio.new_event_loop()
         self.loop.set_debug(self.debug)
+        self.loop._set_coroutine_wrapper(self.debug)
         self.loop_policy = IOCellEventLoopPolicy(self.loop)
         self.loop_exception_handler_save = self.loop._exception_handler
         self.loop.set_exception_handler(self.loop_exception_handler)
 
+    def cleanup_event_loop(self):
+        """ Cleanup an event loop and close it down forever. """
+        for task in asyncio.Task.all_tasks(loop=self.loop):
+            if self.debug:
+                warnings.warn('Cancelling task: %s' % task)
+            task._log_destroy_pending = False
+            task.cancel()
+        self.loop.close()
+        self.loop.set_exception_handler(self.loop_exception_handler_save)
+        self.loop_exception_handler_save = None
+        self.loop_policy = None
+        self.loop = None
+
     def make_coord(self, name):
         return coordination.coordinators[name]()
 
-    def incref(self):
-        """ Used by TaskTier to indicate pending work. """
-        self.refcnt += 1
-
-    def decref(self):
-        """ Used by TaskTier to indicate completed work. """
-        self.refcnt -= 1
-        if not self.refcnt or self.output_buffer:
-            self.loop.stop()
-
     def done(self):
-        return not self.refcnt
+        return all(x.done() for x in asyncio.Task.all_tasks(loop=self.loop))
 
     def assertNotFinalized(self):
-        """ Used in cases where a cell is finalized and should not be altered.
-        To reopen the cell you can use `.reset()`. """
+        """ Ensure the cell is not used more than once. """
         if self.finalized:
             raise RuntimeError('Already finalized: %s' % self)
 
-    def add_tier(self, coro, source=None, **spec):
+    def add_tier(self, coro, source=None, **kwargs):
         """ Add a coroutine to the cell as a task tier.  The source can be a
         single value or a list of either `TaskTier` types or coroutine
         functions already added to a `TaskTier` via `add_tier`. """
         self.assertNotFinalized()
-        tier = self.TaskTier(self, coro, spec)
+        tier = self.TaskTier(self, coro, **kwargs)
         if source:
             if not hasattr(source, '__getitem__'):
                 source = [source]
@@ -117,6 +123,12 @@ class IOCell(object):
         self.tiers.append(tier)
         self.tiers_coro_map[coro] = tier
         return tier
+
+    def add_cleaner(self, coro):
+        """ Add a coroutine to run after the cell is done.  This is for the
+        user to perform any cleanup such as closing sockets. """
+        self.assertNotFinalized()
+        self.cleaners.append(coro)
 
     def tier(self, *args, **kwargs):
         """ Function decorator for a tier cororoutine. """
@@ -139,33 +151,30 @@ class IOCell(object):
             return coro
         return decorator
 
-    def reset(self):
-        """ Make the cell mutable again and/or reset state so the cell can be
-        reused. """
-        if self.loop:
-            if not self.loop.is_closed():
-                raise RuntimeError('Cannot reset while loop is running')
-            del self.starters[:]
-            self.coord.reset()
-        else:
-            self.starters = []
-        self.init_event_loop()
-        self.refcnt = 0
-        self.finalized = False
+    def cleaner(self, coro):
+        """ Function decorator for a cleanup cororoutine. """
+        self.add_cleaner(coro)
+        return coro
+
+    def cleaner_coroutine(self, fn):
+        """ Combination of the `cleaner` decorator and asyncio.coroutine. """
+        return self.cleaner(asyncio.coroutine(fn))
 
     def finalize(self):
         """ Look at our tiers and setup the final data flow.  Once this is run
         a cell can not be modified again. """
         self.assertNotFinalized()
-        final_tiers = []
+        starters = []
+        finishers = []
         for x in self.tiers:
             if not x.source_count:
-                self.starters.append(x)
+                starters.append(x)
             if not x.target_count:
-                final_tiers.append(x)
-        self.add_tier(self.output_feed, source=final_tiers)
-        self.coord.setup(self.tiers)
+                finishers.append(x)
+        self.add_tier(self.output_feed, source=finishers)
+        self.coord.setup_wrap(self)
         self.finalized = True
+        return starters
 
     @asyncio.coroutine
     def output_feed(self, tier, *args, **kwargs):
@@ -182,50 +191,76 @@ class IOCell(object):
         if exc:
             if not self.pending_exception:
                 self.pending_exception = exc
-                self.loop.stop()
         elif self.loop_exception_handler_save:
             return self.loop_exception_handler_save(loop, context)
         else:
             return self.loop.default_exception_handler(context)
 
-    def run_loop(self):
-        with self.loop_policy:
-            self.loop.run_forever()
-
     def output(self):
         """ Produce a classic generator for this cell's final results. """
-        self.finalize()
+        starters = self.finalize()
         try:
-            yield from self._output()
+            yield from self._output(starters)
         finally:
             self.close()
 
-    def _output(self):
-        for x in self.starters:
+    def event_loop(self):
+        """ Run the event loop once. """
+        self.loop._thread_id = threading.get_ident()
+        try:
+            self.loop._run_once()
+        finally:
+            self.loop._thread_id = None
+
+    def _output(self, starters):
+        for x in starters:
             self.loop.create_task(x.enqueue_task())
         while True:
-            if self.pending_exception:
-                exc = self.pending_exception
-                self.pending_exception = None
-                try:
-                    raise exc
-                finally:
-                    del exc
             while self.output_buffer:
                 yield self.output_buffer.popleft()
             if not self.done():
-                self.run_loop()
-            elif not self.output_buffer:
-                break
+                with self.loop_policy:
+                    self.event_loop()
+                if self.pending_exception:
+                    exc = self.pending_exception
+                    self.pending_exception = None
+                    try:
+                        raise exc
+                    finally:
+                        del exc
+            else:
+                flushed = False
+                for t in self.tiers:
+                    if t.buffer:
+                        self.loop.create_task(t.flush())
+                        flushed = True
+                if not flushed and not self.output_buffer:
+                    break
+        with self.loop_policy:
+            self.loop.run_until_complete(self.clean())
+
+    @asyncio.coroutine
+    def clean(self):
+        """ Run all of the cleaners added by the user. """
+        if self.cleaners:
+            yield from asyncio.wait([x() for x in self.cleaners],
+                                    loop=self.loop)
 
     def close(self):
-        if self.loop:
-            for task in asyncio.Task.all_tasks(loop=self.loop):
-                if self.debug:
-                    warnings.warn('Cancelling task: %s' % task)
-                task._log_destroy_pending = False
-                task.cancel()
-            self.loop.close()
+        if self.closed:
+            return
+        self.closed = True
+        self.coord.close_wrap()
+        self.cleanup_event_loop()
+        for x in self.tiers:
+            x.close()
+        self.tiers = None
+        self.tiers_coro_map = None
+        self.cleaners = None
+        self.coord = None
 
     def __iter__(self):
         return self.output()
+
+    def __del__(self):
+        self.close()

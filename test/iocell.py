@@ -141,7 +141,18 @@ class Exceptions(unittest.TestCase):
         cell.add_tier(f2)
         it = iter(cell)
         self.assertRaises(RuntimeError, next, it)
-        self.assertRaises(StopIteration, next, it)  # The value error is just dropped.
+        self.assertRaises(StopIteration, next, it)  # ValueError is dropped.
+
+    def test_background_work_exception(self):
+        cell = IOCell()
+        @asyncio.coroutine
+        def bg():
+            raise Exception()
+        @cell.tier_coroutine()
+        def coro(tier):
+            cell.loop.create_task(bg())
+            yield  # allow bg to run.
+        self.assertRaises(Exception, list, cell)
 
 
 class CoroBasics(unittest.TestCase):
@@ -239,16 +250,6 @@ class Misuse(unittest.TestCase):
                 pass
         self.assertRaises(TypeError, setup)
 
-    def test_miscycle_reset(self):
-        cell = IOCell()
-        @cell.tier_coroutine()
-        def fn(tier):
-            for i in range(3):
-                yield from tier.emit(i)
-        it = iter(cell)
-        next(it)
-        self.assertRaises(RuntimeError, cell.reset)
-
 
 class LifeCycle(unittest.TestCase):
 
@@ -256,16 +257,6 @@ class LifeCycle(unittest.TestCase):
         cell = IOCell()
         list(cell)
         self.assertRaises(RuntimeError, list, cell)
-
-    def test_reuse_after_reset(self):
-        cell = IOCell()
-        @cell.tier_coroutine()
-        def coro(tier):
-            for i in range(3):
-                yield from tier.emit(i)
-        self.assertEqual(list(cell), list(range(3)))
-        cell.reset()
-        self.assertEqual(list(cell), list(range(3)))
 
     def test_trailing_work(self):
         cell = IOCell()
@@ -283,32 +274,18 @@ class LifeCycle(unittest.TestCase):
 
     def test_background_work_clean_exit(self):
         cell = IOCell()
-        loop = cell.loop
-        cancel = mock.Mock()
+        bg_done = False
         @asyncio.coroutine
         def bg():
-            yield from asyncio.sleep(1e300)
+            nonlocal bg_done
+            for x in range(100):
+                yield
+            bg_done = True
         @cell.tier_coroutine()
         def coro(tier):
-            task = loop.create_task(bg())
-            task.cancel = cancel
+            cell.loop.create_task(bg())
         self.assertEqual(list(cell), [])
-        self.assertTrue(cancel.called)
-
-    def test_background_work_exception(self):
-        cell = IOCell()
-        loop = cell.loop
-        cancel = mock.Mock()
-        @asyncio.coroutine
-        def bg():
-            yield from asyncio.sleep(1e300)
-        @cell.tier_coroutine()
-        def coro(tier):
-            task = loop.create_task(bg())
-            task.cancel = cancel
-            raise Exception()
-        self.assertRaises(Exception, list, cell)
-        self.assertTrue(cancel.called)
+        self.assertTrue(bg_done)
 
     def test_background_work_gc(self):
         cell = IOCell()
@@ -316,7 +293,7 @@ class LifeCycle(unittest.TestCase):
         cancel = mock.Mock()
         @asyncio.coroutine
         def bg():
-            yield from asyncio.sleep(1e300)
+            yield from asyncio.sleep(1<<20)
         @cell.tier_coroutine()
         def coro(tier):
             task = loop.create_task(bg())
@@ -328,3 +305,41 @@ class LifeCycle(unittest.TestCase):
         self.assertFalse(cancel.called)
         del l
         self.assertTrue(cancel.called)
+
+class Buffering(unittest.TestCase):
+
+    def test_buffer_1tier_2rem(self):
+        cell = IOCell()
+        @cell.tier_coroutine(buffer=4)
+        def f(tier):
+            for i in range(10):
+                yield from tier.emit(i)
+        self.assertEqual(list(cell), [(0, 1, 2, 3), (4, 5, 6, 7), (8, 9)])
+
+    def test_buffer_1tier_0rem(self):
+        cell = IOCell()
+        @cell.tier_coroutine(buffer=2)
+        def f(tier):
+            for i in range(4):
+                yield from tier.emit(i)
+        self.assertEqual(list(cell), [(0, 1), (2, 3)])
+
+    def test_buffer_2tier_0rem(self):
+        cell = IOCell()
+        cnt = 0
+        @cell.tier_coroutine(buffer=2)
+        def f(tier):
+            yield from tier.emit(1)
+            yield from tier.emit(2)
+            yield from tier.emit(1)
+            yield from tier.emit(2)
+        @cell.tier_coroutine(source=f)
+        def f2(tier, a, b):
+            nonlocal cnt
+            cnt += 1
+            self.assertEqual(a, 1)
+            self.assertEqual(b, 2)
+            yield from tier.emit(a)
+            yield from tier.emit(b)
+        self.assertEqual(list(cell), [1, 2, 1, 2])
+        self.assertEqual(cnt, 2)
