@@ -30,7 +30,8 @@ class AbstractCellCoordinator(object):
     @asyncio.coroutine
     def flush(self, tier):
         """ A regulator for buffered tiers.  Should return True to instruct
-        the source tier to flush it's buffered results to the target tiers. """
+        the source tier to flush it's buffered results to the destination
+        tiers. """
         pass
 
     @asyncio.coroutine

@@ -3,6 +3,11 @@ Tier class.
 """
 
 import asyncio
+import collections
+import weakref
+
+
+Route = collections.namedtuple('Route', 'source, cell, emit')
 
 
 class Tier(object):
@@ -21,12 +26,12 @@ class Tier(object):
     the cell user.  Example python 3.5 style code would be:
 
         >>> @cell.tier()
-        ... async def T1(tier):
-        ...     await tier.emit(1)
+        ... async def T1(route):
+        ...     await route.emit(1)
 
         >>> @cell.tier(source=T2)
-        ... async def T2(tier, v1):
-        ...     await tier.emit(v1 * 2)
+        ... async def T2(route, v1):
+        ...     await route.emit(v1 * 2)
 
         >>> print(list(cell))
         [2]
@@ -34,12 +39,12 @@ class Tier(object):
     The same example in python 3.4:
 
         >>> @cell.tier_coroutine()
-        ... def T1(tier):
-        ...     yeild from tier.emit(1)
+        ... def T1(route):
+        ...     yeild from route.emit(1)
 
         >>> @cell.tier_coroutine(source=T2)
-        ... def T2(tier, v1):
-        ...     yield from tier.emit(v1 * 2)
+        ... def T2(route, v1):
+        ...     yield from route.emit(v1 * 2)
 
         >>> print(list(cell))
         [2]
@@ -66,50 +71,84 @@ class Tier(object):
     The actual number of emit values buffered is controlled by the coordinator.
     """
 
-    @property
-    def target_count(self):
-        return len(self.targets) if self.targets is not None else 0
+    coro_tier_map = weakref.WeakValueDictionary()
 
-    def __init__(self, cell, coro, buffer=0, **spec):
+    @classmethod
+    def make_gatherer(cls, cell, source_tiers, gatherby):
+        """ Produce a single source tier that gathers from a set of tiers when
+        the key function returns a unique result for each tier. """
+        pending = collections.defaultdict(dict)
+        tier_hashes = [hash(x) for x in source_tiers]
+
+        @asyncio.coroutine
+        def organize(route, *data):
+            srchash = hash(route.source)
+            key = gatherby(data)
+            group = pending[key]
+            assert srchash not in group
+            group[srchash] = data
+            if len(group) == len(tier_hashes):
+                del pending[key]
+                yield from route.emit(*[group[x] for x in tier_hashes])
+        return cls(cell, organize)
+
+    def __init__(self, cell, coro, source=None, buffer=0, gatherby=None,
+                 **spec):
+        if not asyncio.iscoroutinefunction(coro):
+            raise ValueError("Function argument must be a coroutine")
+        self.coro = coro
+        self.coro_tier_map[coro] = self
         self.closed = False
         self.cell = cell
-        self.targets = []
-        self.coro = coro
+        self.sources = []
+        self.dests = []
+        if source:
+            if not isinstance(source, collections.Sequence):
+                source = [source]
+            source_tiers = []
+            for x_source in source:
+                if not isinstance(x_source, Tier):
+                    x_source = self.coro_tier_map[x_source]
+                source_tiers.append(x_source)
+            if gatherby is not None:
+                self.add_source(self.make_gatherer(cell, source_tiers,
+                                                   gatherby))
+            else:
+                for x in source_tiers:
+                    self.add_source(x)
         self.spec = spec
         self.buffer_max_size = buffer
         self.buffer = [] if buffer != 0 else None
-        if not asyncio.iscoroutinefunction(coro):
-            raise ValueError("Function argument must be a coroutine")
-        self.source_count = 0
 
     def __repr__(self):
         coro_name = self.coro and self.coro.__name__
-        return '<TaskTier at 0x%x for %s, sources: %d, targets: %d, closed: ' \
-            '%s>' % (id(self), coro_name, self.source_count, self.target_count,
+        return '<TaskTier at 0x%x for %s, sources: %d, dests: %d, closed: ' \
+            '%s>' % (id(self), coro_name, len(self.sources), len(self.dests),
             self.closed)
 
     @asyncio.coroutine
-    def enqueue_task(self, *data):
+    def enqueue_task(self, source, *args):
         """ Enqueue a task execution.  It will run in the background as soon
         as the coordinator clears it to do so. """
         yield from self.cell.coord.enqueue(self)
-        self.cell.loop.create_task(self.coord_wrap(*data))
+        route = Route(source, self.cell, self.emit)
+        self.cell.loop.create_task(self.coord_wrap(route, *args))
 
     @asyncio.coroutine
-    def coord_wrap(self, *data):
+    def coord_wrap(self, *args):
         """ Wrap the coroutine with coordination throttles. """
         yield from self.cell.coord.start(self)
-        yield from self.coro(self, *data)
+        yield from self.coro(*args)
         yield from self.cell.coord.finish(self)
 
     @asyncio.coroutine
     def emit(self, datum):
         """ Send data to the next tier(s).  This call can be delayed if the
         coordinator thinks the backlog is too high for any of the emit
-        targets.  Likewise when buffering emit values prior to enqueuing them
-        we ask the coordinator if we should flush the buffer each time in case
-        the coordinator is managing the buffering by other metrics such as
-        latency. """
+        destinations.  Likewise when buffering emit values prior to enqueuing
+        them we ask the coordinator if we should flush the buffer each time in
+        case the coordinator is managing the buffering by other metrics such
+        as latency. """
         if self.buffer is not None:
             self.buffer.append(datum)
             if self.buffer_max_size is not None:
@@ -119,30 +158,32 @@ class Tier(object):
             if flush:
                 yield from self.flush()
         else:
-            for t in self.targets:
-                yield from t.enqueue_task(datum)
+            for t in self.dests:
+                yield from t.enqueue_task(self, datum)
 
     @asyncio.coroutine
     def flush(self):
-        """ Flush the buffer of buffered tiers to our target tiers. """
+        """ Flush the buffer of buffered tiers to our destination tiers. """
         if self.buffer is None:
             return
         data = self.buffer
         self.buffer = []
-        for t in self.targets:
-            yield from t.enqueue_task(*data)
+        for x in self.dests:
+            yield from x.enqueue_task(self, *data)
 
-    def source_from(self, source_tier):
+    def add_source(self, tier):
         """ Schedule this tier to be called when another tier emits. """
-        self.source_count += 1
-        source_tier.add_target(self)
+        tier.add_dest(self)
+        self.sources.append(tier)
 
-    def add_target(self, tier):
-        """ Run a callback when this tier emits data. """
-        self.targets.append(tier)
+    def add_dest(self, tier):
+        """ Send data to this tier when we emit. """
+        self.dests.append(tier)
 
     def close(self):
         """ Free any potential cycles. """
-        self.coro = None
-        self.targets = None
         self.cell = None
+        self.coro = None
+        self.buffer = None
+        del self.dests[:]
+        del self.sources[:]

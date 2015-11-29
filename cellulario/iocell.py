@@ -53,7 +53,7 @@ class IOCell(object):
     context of a single generator to the outside world.  The calling code
     will work in a normal blocking fashion (more or less). """
 
-    TaskTier = tier.Tier
+    Tier = tier.Tier
 
     def __init__(self, coord='noop', debug=True):
         if isinstance(coord, coordination.AbstractCellCoordinator):
@@ -104,22 +104,12 @@ class IOCell(object):
         if self.finalized:
             raise RuntimeError('Already finalized: %s' % self)
 
-    def add_tier(self, coro, source=None, **kwargs):
+    def add_tier(self, coro, **kwargs):
         """ Add a coroutine to the cell as a task tier.  The source can be a
-        single value or a list of either `TaskTier` types or coroutine
-        functions already added to a `TaskTier` via `add_tier`. """
+        single value or a list of either `Tier` types or coroutine functions
+        already added to a `Tier` via `add_tier`. """
         self.assertNotFinalized()
-        tier = self.TaskTier(self, coro, **kwargs)
-        if source:
-            if not hasattr(source, '__getitem__'):
-                source = [source]
-            source_tiers = []
-            for x_source in source:
-                if not isinstance(x_source, self.TaskTier):
-                    x_source = self.tiers_coro_map[x_source]
-                source_tiers.append(x_source)
-            for x in source_tiers:
-                tier.source_from(x)
+        tier = self.Tier(self, coro, **kwargs)
         self.tiers.append(tier)
         self.tiers_coro_map[coro] = tier
         return tier
@@ -167,9 +157,9 @@ class IOCell(object):
         starters = []
         finishers = []
         for x in self.tiers:
-            if not x.source_count:
+            if not x.sources:
                 starters.append(x)
-            if not x.target_count:
+            if not x.dests:
                 finishers.append(x)
         self.add_tier(self.output_feed, source=finishers)
         self.coord.setup_wrap(self)
@@ -214,7 +204,7 @@ class IOCell(object):
 
     def _output(self, starters):
         for x in starters:
-            self.loop.create_task(x.enqueue_task())
+            self.loop.create_task(x.enqueue_task(None))
         while True:
             while self.output_buffer:
                 yield self.output_buffer.popleft()

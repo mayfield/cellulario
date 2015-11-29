@@ -3,6 +3,7 @@ AsyncIOGenerator tests.
 """
 
 import asyncio
+import operator
 import unittest
 from cellulario import IOCell as _IOCell
 from unittest import mock
@@ -22,7 +23,7 @@ class NoFinal(unittest.TestCase):
         cell = IOCell()
         refcnt = 0
         @asyncio.coroutine
-        def f(tier):
+        def f(route):
             nonlocal refcnt
             refcnt += 1
         cell.add_tier(f)
@@ -33,11 +34,11 @@ class NoFinal(unittest.TestCase):
         cell = IOCell()
         refcnt = 0
         @asyncio.coroutine
-        def f(tier):
+        def f(route):
             nonlocal refcnt
             refcnt += 1
         @asyncio.coroutine
-        def f2(tier):
+        def f2(route):
             nonlocal refcnt
             refcnt += 1
         t1 = cell.add_tier(f)
@@ -48,10 +49,10 @@ class NoFinal(unittest.TestCase):
     def test_cascaded_tiers(self):
         cell = IOCell()
         @asyncio.coroutine
-        def f(tier):
-            yield from tier.emit(123)
+        def f(route):
+            yield from route.emit(123)
         @asyncio.coroutine
-        def f2(tier, foo):
+        def f2(route, foo):
             self.assertEqual(foo, 123)
         t1 = cell.add_tier(f)
         cell.add_tier(f2, source=[t1])
@@ -64,10 +65,10 @@ class WithFinal(unittest.TestCase):
         cell = IOCell()
         refcnt = 0
         @asyncio.coroutine
-        def f(tier):
+        def f(route):
             nonlocal refcnt
             refcnt += 1
-            yield from tier.emit(123)
+            yield from route.emit(123)
         cell.add_tier(f)
         results = list(cell)
         self.assertEqual(refcnt, 1)
@@ -76,23 +77,23 @@ class WithFinal(unittest.TestCase):
     def test_multi_emitter_1level(self):
         cell = IOCell()
         @asyncio.coroutine
-        def f(tier):
-            yield from tier.emit(123)
-            yield from tier.emit(321)
+        def f(route):
+            yield from route.emit(123)
+            yield from route.emit(321)
         cell.add_tier(f)
         self.assertEqual(list(cell), [123, 321])
 
     def test_multi_emitter_2level(self):
         cell = IOCell()
         @asyncio.coroutine
-        def f(tier):
-            yield from tier.emit(123)
-            yield from tier.emit(321)
+        def f(route):
+            yield from route.emit(123)
+            yield from route.emit(321)
         t = cell.add_tier(f)
         @asyncio.coroutine
-        def f2(tier, number):
-            yield from tier.emit(-number)
-            yield from tier.emit(number + 1)
+        def f2(route, number):
+            yield from route.emit(-number)
+            yield from route.emit(number + 1)
         cell.add_tier(f2, source=t)
         self.assertEqual(list(cell), [-123, 124, -321, 322])
 
@@ -100,20 +101,20 @@ class WithFinal(unittest.TestCase):
         cell = IOCell()
 
         @asyncio.coroutine
-        def a1(tier):
-            yield from tier.emit('a1-1')
-            yield from tier.emit('a1-2')
+        def a1(route):
+            yield from route.emit('a1-1')
+            yield from route.emit('a1-2')
         a1t = cell.add_tier(a1)
 
         @asyncio.coroutine
-        def a2(tier):
-            yield from tier.emit('a2-1')
-            yield from tier.emit('a2-2')
+        def a2(route):
+            yield from route.emit('a2-1')
+            yield from route.emit('a2-2')
         a2t = cell.add_tier(a2)
 
         @asyncio.coroutine
-        def b(tier, value):
-            yield from tier.emit(value)
+        def b(route, value):
+            yield from route.emit(value)
         cell.add_tier(b, source=[a1t, a2t])
 
         self.assertEqual(list(cell), ['a1-1', 'a1-2', 'a2-1', 'a2-2'])
@@ -124,7 +125,7 @@ class Exceptions(unittest.TestCase):
     def test_blowup(self):
         cell = IOCell()
         @asyncio.coroutine
-        def f(tier):
+        def f(route):
             raise RuntimeError()
         cell.add_tier(f)
         self.assertRaises(RuntimeError, list, cell)
@@ -132,11 +133,11 @@ class Exceptions(unittest.TestCase):
     def test_multi_blowup(self):
         cell = IOCell()
         @asyncio.coroutine
-        def f(tier):
+        def f(route):
             raise RuntimeError()
         cell.add_tier(f)
         @asyncio.coroutine
-        def f2(tier):
+        def f2(route):
             raise ValueError()
         cell.add_tier(f2)
         it = iter(cell)
@@ -149,7 +150,7 @@ class Exceptions(unittest.TestCase):
         def bg():
             raise Exception()
         @cell.tier_coroutine()
-        def coro(tier):
+        def coro(route):
             cell.loop.create_task(bg())
             yield  # allow bg to run.
         self.assertRaises(Exception, list, cell)
@@ -164,8 +165,8 @@ class CoroBasics(unittest.TestCase):
     def test_yield_from(self):
         cell = IOCell()
         @asyncio.coroutine
-        def coro(tier):
-            yield from tier.emit((yield from self.add(2, 3)))
+        def coro(route):
+            yield from route.emit((yield from self.add(2, 3)))
         cell.add_tier(coro)
         self.assertEqual(list(cell), [5])
 
@@ -177,7 +178,7 @@ class ShortPatterns(unittest.TestCase):
         refcnt = 0
         @cell.tier()
         @asyncio.coroutine
-        def f(tier):
+        def f(route):
             nonlocal refcnt
             refcnt += 1
         self.assertFalse(list(cell))
@@ -188,12 +189,12 @@ class ShortPatterns(unittest.TestCase):
         refcnt = 0
         @cell.tier()
         @asyncio.coroutine
-        def f(tier):
+        def f(route):
             nonlocal refcnt
             refcnt += 1
         @cell.tier(source=f)
         @asyncio.coroutine
-        def f2(tier):
+        def f2(route):
             nonlocal refcnt
             refcnt += 1
         self.assertFalse(list(cell))
@@ -203,11 +204,25 @@ class ShortPatterns(unittest.TestCase):
         cell = IOCell()
         refcnt = 0
         @cell.tier_coroutine()
-        def f(tier):
+        def f(route):
             nonlocal refcnt
             refcnt += 1
         @cell.tier_coroutine(source=f)
-        def f2(tier):
+        def f2(route):
+            nonlocal refcnt
+            refcnt += 1
+        self.assertFalse(list(cell))
+        self.assertEqual(refcnt, 1)
+
+    def test_source_from_coroutine_sequence(self):
+        cell = IOCell()
+        refcnt = 0
+        @cell.tier_coroutine()
+        def f(route):
+            nonlocal refcnt
+            refcnt += 1
+        @cell.tier_coroutine(source=[f])
+        def f2(route):
             nonlocal refcnt
             refcnt += 1
         self.assertFalse(list(cell))
@@ -219,12 +234,12 @@ class Nesting(unittest.TestCase):
     def test_from_cell_generator(self):
         inner = IOCell()
         @inner.tier_coroutine()
-        def inner_tier(tier):
+        def inner_tier(route):
             for i in range(3):
-                yield from tier.emit(i)
+                yield from route.emit(i)
         outer = IOCell()
         @outer.tier_coroutine()
-        def outer_tier(tier):
+        def outer_tier(route):
             yield from asyncio.sleep(0)
             inner_it = iter(inner)
             for i in range(3):
@@ -238,7 +253,7 @@ class Misuse(unittest.TestCase):
         cell = IOCell()
         def setup():
             @cell.tier
-            def fn(tier):
+            def fn(route):
                 pass
         self.assertRaises(TypeError, setup)
 
@@ -246,7 +261,7 @@ class Misuse(unittest.TestCase):
         cell = IOCell()
         def setup():
             @cell.tier_coroutine
-            def fn(tier):
+            def fn(route):
                 pass
         self.assertRaises(TypeError, setup)
 
@@ -262,10 +277,10 @@ class LifeCycle(unittest.TestCase):
         cell = IOCell()
         fullrun = False
         @cell.tier_coroutine()
-        def coro(tier):
+        def coro(route):
             nonlocal fullrun
             for i in range(3):
-                yield from tier.emit(i)
+                yield from route.emit(i)
             for ii in range(3):
                 yield from asyncio.sleep(0)
             fullrun = True
@@ -282,8 +297,8 @@ class LifeCycle(unittest.TestCase):
                 yield
             bg_done = True
         @cell.tier_coroutine()
-        def coro(tier):
-            cell.loop.create_task(bg())
+        def coro(route):
+            route.cell.loop.create_task(bg())
         self.assertEqual(list(cell), [])
         self.assertTrue(bg_done)
 
@@ -295,51 +310,78 @@ class LifeCycle(unittest.TestCase):
         def bg():
             yield from asyncio.sleep(1<<20)
         @cell.tier_coroutine()
-        def coro(tier):
+        def coro(route):
             task = loop.create_task(bg())
             task.cancel = cancel
             for i in range(10):
-                yield from tier.emit(i)
+                yield from route.emit(i)
         l = iter(cell)
         next(l)
         self.assertFalse(cancel.called)
         del l
         self.assertTrue(cancel.called)
 
+
 class Buffering(unittest.TestCase):
 
     def test_buffer_1tier_2rem(self):
         cell = IOCell()
         @cell.tier_coroutine(buffer=4)
-        def f(tier):
+        def f(route):
             for i in range(10):
-                yield from tier.emit(i)
+                yield from route.emit(i)
         self.assertEqual(list(cell), [(0, 1, 2, 3), (4, 5, 6, 7), (8, 9)])
 
     def test_buffer_1tier_0rem(self):
         cell = IOCell()
         @cell.tier_coroutine(buffer=2)
-        def f(tier):
+        def f(route):
             for i in range(4):
-                yield from tier.emit(i)
+                yield from route.emit(i)
         self.assertEqual(list(cell), [(0, 1), (2, 3)])
 
     def test_buffer_2tier_0rem(self):
         cell = IOCell()
         cnt = 0
         @cell.tier_coroutine(buffer=2)
-        def f(tier):
-            yield from tier.emit(1)
-            yield from tier.emit(2)
-            yield from tier.emit(1)
-            yield from tier.emit(2)
+        def f(route):
+            yield from route.emit(1)
+            yield from route.emit(2)
+            yield from route.emit(1)
+            yield from route.emit(2)
         @cell.tier_coroutine(source=f)
-        def f2(tier, a, b):
+        def f2(route, a, b):
             nonlocal cnt
             cnt += 1
             self.assertEqual(a, 1)
             self.assertEqual(b, 2)
-            yield from tier.emit(a)
-            yield from tier.emit(b)
+            yield from route.emit(a)
+            yield from route.emit(b)
         self.assertEqual(list(cell), [1, 2, 1, 2])
         self.assertEqual(cnt, 2)
+
+
+class Gather(unittest.TestCase):
+
+    def test_gatherby_TEST(self):
+        cell = IOCell()
+        @cell.tier_coroutine()
+        def a1(route):
+            for i in range(10):
+                yield from route.emit({
+                    "foo": i,
+                    "source": 'a1'
+                })
+        @cell.tier_coroutine()
+        def a2(route):
+            for i in range(9, -1, -1):
+                yield from route.emit({
+                    "foo": i,
+                    "source": 'a2'
+                })
+        @cell.tier_coroutine(source=[a1, a2],
+                             gatherby=operator.itemgetter('foo'))
+        def reducer(route, t1, t2):
+            self.assertEqual(t1['foo'], t2['foo'])
+            self.assertEqual(t1['source'], 'a1')
+            self.assertEqual(t2['source'], 'a2')

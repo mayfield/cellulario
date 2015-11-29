@@ -8,10 +8,11 @@ are deleted.
 """
 
 
+import asyncio
 import gc
 import unittest
 import weakref
-from cellulario import IOCell
+from cellulario import IOCell, Tier
 
 
 class CollectWithoutGC(unittest.TestCase):
@@ -36,8 +37,8 @@ class CollectWithoutGC(unittest.TestCase):
                 pass
             thing = Thing()
             @cell.tier_coroutine()
-            def tier(t):
-                yield from t.emit(thing)
+            def tier(r):
+                yield from r.emit(thing)
             return cell
         c = wrap()
         ref = weakref.ref(c)
@@ -54,12 +55,12 @@ class CollectWithoutGC(unittest.TestCase):
             thing1.thing2 = Thing()
             thing1.thing2.thing1 = thing1
             @cell.tier_coroutine()
-            def tier1(t):
+            def tier1(r):
                 thing1.hello = 'world'
-                yield from t.emit(thing1)
+                yield from r.emit(thing1)
             @cell.tier_coroutine(source=tier1)
-            def tier2(t, thing):
-                yield from t.emit(thing)
+            def tier2(r, thing):
+                yield from r.emit(thing)
             return cell
         c = wrap()
         cellref = weakref.ref(c)
@@ -67,3 +68,9 @@ class CollectWithoutGC(unittest.TestCase):
         del c
         self.assertIsNone(cellref())
         self.assertIsNotNone(thingref())
+
+    def test_tier_collect(self):
+        t = Tier(None, asyncio.coroutine(lambda: 1))
+        ref = weakref.ref(t)
+        del t
+        self.assertIsNone(ref())

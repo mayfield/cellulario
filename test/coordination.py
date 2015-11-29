@@ -23,7 +23,7 @@ class InterfaceTests(unittest.TestCase):
                 states['exit'] = time.time()
         cell = IOCell(coord=Coord(), debug=True)
         @cell.tier_coroutine()
-        def t(tier):
+        def t(route):
             states['proc'] = time.time()
         list(cell)
         self.assertSetEqual(set(states), {'enter', 'proc', 'exit'})
