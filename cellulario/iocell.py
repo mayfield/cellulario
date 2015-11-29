@@ -167,14 +167,10 @@ class IOCell(object):
         return starters
 
     @asyncio.coroutine
-    def output_feed(self, tier, *args, **kwargs):
+    def output_feed(self, route, *args):
         """ Simplify arguments and store them in the `output` buffer for
         yielding to the user. """
-        if not kwargs:
-            arg = args[0] if len(args) == 1 else args
-        else:
-            arg = kwargs if not args else args, kwargs
-        self.output_buffer.append(arg)
+        self.output_buffer.extend(args)
 
     def loop_exception_handler(self, loop, context):
         exc = context.get('exception')

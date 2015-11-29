@@ -58,6 +58,19 @@ class NoFinal(unittest.TestCase):
         cell.add_tier(f2, source=[t1])
         self.assertFalse(list(cell))
 
+    def test_varargs(self):
+        cell = IOCell()
+        @asyncio.coroutine
+        def f(route):
+            yield from route.emit(123, 345)
+        @asyncio.coroutine
+        def f2(route, foo, bar):
+            self.assertEqual(foo, 123)
+            self.assertEqual(bar, 345)
+        t1 = cell.add_tier(f)
+        cell.add_tier(f2, source=[t1])
+        self.assertFalse(list(cell))
+
 
 class WithFinal(unittest.TestCase):
 
@@ -99,25 +112,30 @@ class WithFinal(unittest.TestCase):
 
     def test_multi_emitter_multi_source(self):
         cell = IOCell()
-
         @asyncio.coroutine
         def a1(route):
             yield from route.emit('a1-1')
             yield from route.emit('a1-2')
         a1t = cell.add_tier(a1)
-
         @asyncio.coroutine
         def a2(route):
             yield from route.emit('a2-1')
             yield from route.emit('a2-2')
         a2t = cell.add_tier(a2)
-
         @asyncio.coroutine
         def b(route, value):
             yield from route.emit(value)
         cell.add_tier(b, source=[a1t, a2t])
-
         self.assertEqual(list(cell), ['a1-1', 'a1-2', 'a2-1', 'a2-2'])
+
+    def test_varargs(self):
+        cell = IOCell()
+        @asyncio.coroutine
+        def f(route):
+            yield from route.emit(*'abc')
+            yield from route.emit(*'def')
+        cell.add_tier(f)
+        self.assertEqual(list(cell), list('abcdef'))
 
 
 class Exceptions(unittest.TestCase):
@@ -330,7 +348,7 @@ class Buffering(unittest.TestCase):
         def f(route):
             for i in range(10):
                 yield from route.emit(i)
-        self.assertEqual(list(cell), [(0, 1, 2, 3), (4, 5, 6, 7), (8, 9)])
+        self.assertEqual(list(cell), list(range(10)))
 
     def test_buffer_1tier_0rem(self):
         cell = IOCell()
@@ -338,7 +356,7 @@ class Buffering(unittest.TestCase):
         def f(route):
             for i in range(4):
                 yield from route.emit(i)
-        self.assertEqual(list(cell), [(0, 1), (2, 3)])
+        self.assertEqual(list(cell), list(range(4)))
 
     def test_buffer_2tier_0rem(self):
         cell = IOCell()
@@ -360,10 +378,21 @@ class Buffering(unittest.TestCase):
         self.assertEqual(list(cell), [1, 2, 1, 2])
         self.assertEqual(cnt, 2)
 
+    def test_buffer_1tier_2rem_varargs(self):
+        cell = IOCell()
+        @cell.tier_coroutine(buffer=4)
+        def f(route):
+            for i in range(10):
+                yield from route.emit(i, str(i))
+        expect = []
+        for i in range(10):
+            expect.extend((i, str(i)))
+        self.assertEqual(list(cell), expect)
+
 
 class Gather(unittest.TestCase):
 
-    def test_gatherby_TEST(self):
+    def test_gatherby_dict_key(self):
         cell = IOCell()
         @cell.tier_coroutine()
         def a1(route):
@@ -385,3 +414,18 @@ class Gather(unittest.TestCase):
             self.assertEqual(t1['foo'], t2['foo'])
             self.assertEqual(t1['source'], 'a1')
             self.assertEqual(t2['source'], 'a2')
+
+    def test_gatherby_pos_arg(self):
+        cell = IOCell()
+        @cell.tier_coroutine()
+        def a1(route):
+            yield from route.emit(111, 'first')
+        @cell.tier_coroutine()
+        def a2(route):
+            yield from route.emit(111, 'second')
+        @cell.tier_coroutine(source=[a1, a2], gatherby=lambda a, b: a)
+        def reducer(route, t1, t2):
+            self.assertEqual(t1[0], 111)
+            self.assertEqual(t2[0], 111)
+            self.assertEqual(t1[1], 'first')
+            self.assertEqual(t2[1], 'second')

@@ -7,7 +7,7 @@ import collections
 import weakref
 
 
-Route = collections.namedtuple('Route', 'source, cell, emit')
+Route = collections.namedtuple('Route', 'source, cell, spec, emit')
 
 
 class Tier(object):
@@ -81,12 +81,12 @@ class Tier(object):
         tier_hashes = [hash(x) for x in source_tiers]
 
         @asyncio.coroutine
-        def organize(route, *data):
+        def organize(route, *args):
             srchash = hash(route.source)
-            key = gatherby(data)
+            key = gatherby(*args)
             group = pending[key]
             assert srchash not in group
-            group[srchash] = data
+            group[srchash] = args
             if len(group) == len(tier_hashes):
                 del pending[key]
                 yield from route.emit(*[group[x] for x in tier_hashes])
@@ -131,7 +131,7 @@ class Tier(object):
         """ Enqueue a task execution.  It will run in the background as soon
         as the coordinator clears it to do so. """
         yield from self.cell.coord.enqueue(self)
-        route = Route(source, self.cell, self.emit)
+        route = Route(source, self.cell, self.spec, self.emit)
         self.cell.loop.create_task(self.coord_wrap(route, *args))
 
     @asyncio.coroutine
@@ -142,7 +142,7 @@ class Tier(object):
         yield from self.cell.coord.finish(self)
 
     @asyncio.coroutine
-    def emit(self, datum):
+    def emit(self, *args):
         """ Send data to the next tier(s).  This call can be delayed if the
         coordinator thinks the backlog is too high for any of the emit
         destinations.  Likewise when buffering emit values prior to enqueuing
@@ -150,7 +150,7 @@ class Tier(object):
         case the coordinator is managing the buffering by other metrics such
         as latency. """
         if self.buffer is not None:
-            self.buffer.append(datum)
+            self.buffer.extend(args)
             if self.buffer_max_size is not None:
                 flush = len(self.buffer) >= self.buffer_max_size
             else:
@@ -159,7 +159,7 @@ class Tier(object):
                 yield from self.flush()
         else:
             for t in self.dests:
-                yield from t.enqueue_task(self, datum)
+                yield from t.enqueue_task(self, *args)
 
     @asyncio.coroutine
     def flush(self):
