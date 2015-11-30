@@ -111,8 +111,10 @@ class Tier(object):
                     x_source = self.coro_tier_map[x_source]
                 source_tiers.append(x_source)
             if gatherby is not None:
-                self.add_source(self.make_gatherer(cell, source_tiers,
-                                                   gatherby))
+                gatherer = self.make_gatherer(cell, source_tiers, gatherby)
+                for x in source_tiers:
+                    gatherer.add_source(x)
+                self.add_source(gatherer)
             else:
                 for x in source_tiers:
                     self.add_source(x)

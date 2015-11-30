@@ -394,6 +394,7 @@ class Gather(unittest.TestCase):
 
     def test_gatherby_dict_key(self):
         cell = IOCell()
+        reduced = False
         @cell.tier_coroutine()
         def a1(route):
             for i in range(10):
@@ -411,12 +412,17 @@ class Gather(unittest.TestCase):
         @cell.tier_coroutine(source=[a1, a2],
                              gatherby=operator.itemgetter('foo'))
         def reducer(route, t1, t2):
-            self.assertEqual(t1['foo'], t2['foo'])
-            self.assertEqual(t1['source'], 'a1')
-            self.assertEqual(t2['source'], 'a2')
+            nonlocal reduced
+            self.assertEqual(t1[0]['foo'], t2[0]['foo'])
+            self.assertEqual(t1[0]['source'], 'a1')
+            self.assertEqual(t2[0]['source'], 'a2')
+            reduced = True
+        list(cell)
+        self.assertTrue(reduced)
 
     def test_gatherby_pos_arg(self):
         cell = IOCell()
+        reduced = False
         @cell.tier_coroutine()
         def a1(route):
             yield from route.emit(111, 'first')
@@ -425,7 +431,11 @@ class Gather(unittest.TestCase):
             yield from route.emit(111, 'second')
         @cell.tier_coroutine(source=[a1, a2], gatherby=lambda a, b: a)
         def reducer(route, t1, t2):
+            nonlocal reduced
             self.assertEqual(t1[0], 111)
             self.assertEqual(t2[0], 111)
             self.assertEqual(t1[1], 'first')
             self.assertEqual(t2[1], 'second')
+            reduced = True
+        list(cell)
+        self.assertTrue(reduced)
