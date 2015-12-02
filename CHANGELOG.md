@@ -2,6 +2,9 @@
 
 
 ## [Unreleased] - unreleased
+
+
+## [2] - 2015-12-02
 ### Fixed
 - Better fine grain execution of tasks that may emit in bulk.
 
