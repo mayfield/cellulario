@@ -135,6 +135,10 @@ class Tier(object):
         yield from self.cell.coord.enqueue(self)
         route = Route(source, self.cell, self.spec, self.emit)
         self.cell.loop.create_task(self.coord_wrap(route, *args))
+        # To guarantee that the event loop works fluidly, we manually yield
+        # once. The coordinator enqueue coroutine is not required to yield so
+        # this ensures we avoid various forms of event starvation regardless.
+        yield
 
     @asyncio.coroutine
     def coord_wrap(self, *args):

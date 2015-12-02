@@ -126,7 +126,7 @@ class WithFinal(unittest.TestCase):
         def b(route, value):
             yield from route.emit(value)
         cell.add_tier(b, source=[a1t, a2t])
-        self.assertEqual(list(cell), ['a1-1', 'a1-2', 'a2-1', 'a2-2'])
+        self.assertEqual(list(cell), ['a1-1', 'a2-1', 'a1-2', 'a2-2'])
 
     def test_varargs(self):
         cell = IOCell()
@@ -136,6 +136,47 @@ class WithFinal(unittest.TestCase):
             yield from route.emit(*'def')
         cell.add_tier(f)
         self.assertEqual(list(cell), list('abcdef'))
+
+    def test_multi_emitter_1level(self):
+        cell = IOCell()
+        @asyncio.coroutine
+        def f(route):
+            yield from route.emit(123)
+            yield from route.emit(321)
+        cell.add_tier(f)
+        self.assertEqual(list(cell), [123, 321])
+
+    def test_multi_emitter_2level(self):
+        cell = IOCell()
+        @asyncio.coroutine
+        def f(route):
+            yield from route.emit(123)
+            yield from route.emit(321)
+        t = cell.add_tier(f)
+        @asyncio.coroutine
+        def f2(route, number):
+            yield from route.emit(-number)
+            yield from route.emit(number + 1)
+        cell.add_tier(f2, source=t)
+        self.assertEqual(list(cell), [-123, 124, -321, 322])
+
+    def test_multi_emitter_multi_source(self):
+        cell = IOCell()
+        @asyncio.coroutine
+        def a1(route):
+            yield from route.emit('a1-1')
+            yield from route.emit('a1-2')
+        a1t = cell.add_tier(a1)
+        @asyncio.coroutine
+        def a2(route):
+            yield from route.emit('a2-1')
+            yield from route.emit('a2-2')
+        a2t = cell.add_tier(a2)
+        @asyncio.coroutine
+        def b(route, value):
+            yield from route.emit(value)
+        cell.add_tier(b, source=[a1t, a2t])
+        self.assertEqual(list(cell), ['a1-1', 'a2-1', 'a1-2', 'a2-2'])
 
 
 class Exceptions(unittest.TestCase):
@@ -167,7 +208,7 @@ class Exceptions(unittest.TestCase):
         @asyncio.coroutine
         def bg():
             raise Exception()
-        @cell.tier_coroutine()
+        @cell.tier()
         def coro(route):
             cell.loop.create_task(bg())
             yield  # allow bg to run.
@@ -221,11 +262,11 @@ class ShortPatterns(unittest.TestCase):
     def test_cascaded_tiers_no_emit_tier_coro_deco(self):
         cell = IOCell()
         refcnt = 0
-        @cell.tier_coroutine()
+        @cell.tier()
         def f(route):
             nonlocal refcnt
             refcnt += 1
-        @cell.tier_coroutine(source=f)
+        @cell.tier(source=f)
         def f2(route):
             nonlocal refcnt
             refcnt += 1
@@ -235,11 +276,11 @@ class ShortPatterns(unittest.TestCase):
     def test_source_from_coroutine_sequence(self):
         cell = IOCell()
         refcnt = 0
-        @cell.tier_coroutine()
+        @cell.tier()
         def f(route):
             nonlocal refcnt
             refcnt += 1
-        @cell.tier_coroutine(source=[f])
+        @cell.tier(source=[f])
         def f2(route):
             nonlocal refcnt
             refcnt += 1
@@ -251,12 +292,12 @@ class Nesting(unittest.TestCase):
 
     def test_from_cell_generator(self):
         inner = IOCell()
-        @inner.tier_coroutine()
+        @inner.tier()
         def inner_tier(route):
             for i in range(3):
                 yield from route.emit(i)
         outer = IOCell()
-        @outer.tier_coroutine()
+        @outer.tier()
         def outer_tier(route):
             yield from asyncio.sleep(0)
             inner_it = iter(inner)
@@ -278,7 +319,7 @@ class Misuse(unittest.TestCase):
     def test_uncalled_tier_coro_decor(self):
         cell = IOCell()
         def setup():
-            @cell.tier_coroutine
+            @cell.tier
             def fn(route):
                 pass
         self.assertRaises(TypeError, setup)
@@ -294,7 +335,7 @@ class LifeCycle(unittest.TestCase):
     def test_trailing_work(self):
         cell = IOCell()
         fullrun = False
-        @cell.tier_coroutine()
+        @cell.tier()
         def coro(route):
             nonlocal fullrun
             for i in range(3):
@@ -314,7 +355,7 @@ class LifeCycle(unittest.TestCase):
             for x in range(100):
                 yield
             bg_done = True
-        @cell.tier_coroutine()
+        @cell.tier()
         def coro(route):
             route.cell.loop.create_task(bg())
         self.assertEqual(list(cell), [])
@@ -327,7 +368,7 @@ class LifeCycle(unittest.TestCase):
         @asyncio.coroutine
         def bg():
             yield from asyncio.sleep(1<<20)
-        @cell.tier_coroutine()
+        @cell.tier()
         def coro(route):
             task = loop.create_task(bg())
             task.cancel = cancel
@@ -344,7 +385,7 @@ class Buffering(unittest.TestCase):
 
     def test_buffer_1tier_2rem(self):
         cell = IOCell()
-        @cell.tier_coroutine(buffer=4)
+        @cell.tier(buffer=4)
         def f(route):
             for i in range(10):
                 yield from route.emit(i)
@@ -352,7 +393,7 @@ class Buffering(unittest.TestCase):
 
     def test_buffer_1tier_0rem(self):
         cell = IOCell()
-        @cell.tier_coroutine(buffer=2)
+        @cell.tier(buffer=2)
         def f(route):
             for i in range(4):
                 yield from route.emit(i)
@@ -361,13 +402,13 @@ class Buffering(unittest.TestCase):
     def test_buffer_2tier_0rem(self):
         cell = IOCell()
         cnt = 0
-        @cell.tier_coroutine(buffer=2)
+        @cell.tier(buffer=2)
         def f(route):
             yield from route.emit(1)
             yield from route.emit(2)
             yield from route.emit(1)
             yield from route.emit(2)
-        @cell.tier_coroutine(source=f)
+        @cell.tier(source=f)
         def f2(route, a, b):
             nonlocal cnt
             cnt += 1
@@ -380,7 +421,7 @@ class Buffering(unittest.TestCase):
 
     def test_buffer_1tier_2rem_varargs(self):
         cell = IOCell()
-        @cell.tier_coroutine(buffer=4)
+        @cell.tier(buffer=4)
         def f(route):
             for i in range(10):
                 yield from route.emit(i, str(i))
@@ -395,22 +436,21 @@ class Gather(unittest.TestCase):
     def test_gatherby_dict_key(self):
         cell = IOCell()
         reduced = False
-        @cell.tier_coroutine()
+        @cell.tier()
         def a1(route):
             for i in range(10):
                 yield from route.emit({
                     "foo": i,
                     "source": 'a1'
                 })
-        @cell.tier_coroutine()
+        @cell.tier(append=False)
         def a2(route):
             for i in range(9, -1, -1):
                 yield from route.emit({
                     "foo": i,
                     "source": 'a2'
                 })
-        @cell.tier_coroutine(source=[a1, a2],
-                             gatherby=operator.itemgetter('foo'))
+        @cell.tier(source=[a1, a2], gatherby=operator.itemgetter('foo'))
         def reducer(route, t1, t2):
             nonlocal reduced
             self.assertEqual(t1[0]['foo'], t2[0]['foo'])
@@ -423,13 +463,13 @@ class Gather(unittest.TestCase):
     def test_gatherby_pos_arg(self):
         cell = IOCell()
         reduced = False
-        @cell.tier_coroutine()
+        @cell.tier()
         def a1(route):
             yield from route.emit(111, 'first')
-        @cell.tier_coroutine()
+        @cell.tier(append=False)
         def a2(route):
             yield from route.emit(111, 'second')
-        @cell.tier_coroutine(source=[a1, a2], gatherby=lambda a, b: a)
+        @cell.tier(source=[a1, a2], gatherby=lambda a, b: a)
         def reducer(route, t1, t2):
             nonlocal reduced
             self.assertEqual(t1[0], 111)
@@ -439,3 +479,54 @@ class Gather(unittest.TestCase):
             reduced = True
         list(cell)
         self.assertTrue(reduced)
+
+
+class AppendTier(unittest.TestCase):
+
+    def test_one_tier_append(self):
+        cell = IOCell()
+        @asyncio.coroutine
+        def f(route):
+            yield from route.emit(123)
+        cell.append_tier(f)
+        self.assertEqual(list(cell), [123])
+
+    def test_one_tier_coro(self):
+        cell = IOCell()
+        @cell.tier()
+        def f(route):
+            yield from route.emit(123)
+        self.assertEqual(list(cell), [123])
+
+    def test_two_tier_coro(self):
+        cell = IOCell()
+        @cell.tier()
+        def f(route):
+            yield from route.emit(100)
+        @cell.tier()
+        def f2(route, i):
+            yield from route.emit(i + 50)
+        self.assertEqual(list(cell), [150])
+
+    def test_coro_noappend(self):
+        cell = IOCell()
+        @cell.tier()
+        def a1(route):
+            yield from route.emit(100)
+        @cell.tier(append=False)
+        def a2(route):
+            yield from route.emit(200)
+        self.assertEqual(list(cell), [100, 200])
+
+    def test_coro_source_override(self):
+        cell = IOCell()
+        @cell.tier()
+        def a1(route):
+            yield from route.emit(100)
+        @cell.tier(append=False)
+        def a2(route):
+            yield from route.emit(200)
+        @cell.tier(source=a1)
+        def b1(route, i):
+            yield from route.emit(i + 1)
+        self.assertEqual(list(cell), [200, 101])

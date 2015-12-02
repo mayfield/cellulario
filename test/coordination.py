@@ -22,7 +22,7 @@ class InterfaceTests(unittest.TestCase):
             def finish(self, tier):
                 states['exit'] = time.time()
         cell = IOCell(coord=Coord(), debug=True)
-        @cell.tier_coroutine()
+        @cell.tier()
         def t(route):
             states['proc'] = time.time()
         list(cell)

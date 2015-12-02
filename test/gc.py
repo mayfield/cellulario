@@ -36,7 +36,7 @@ class CollectWithoutGC(unittest.TestCase):
             class Thing(object):
                 pass
             thing = Thing()
-            @cell.tier_coroutine()
+            @cell.tier()
             def tier(r):
                 yield from r.emit(thing)
             return cell
@@ -54,11 +54,11 @@ class CollectWithoutGC(unittest.TestCase):
             thing1 = Thing()
             thing1.thing2 = Thing()
             thing1.thing2.thing1 = thing1
-            @cell.tier_coroutine()
+            @cell.tier()
             def tier1(r):
                 thing1.hello = 'world'
                 yield from r.emit(thing1)
-            @cell.tier_coroutine(source=tier1)
+            @cell.tier(source=tier1)
             def tier2(r, thing):
                 yield from r.emit(thing)
             return cell

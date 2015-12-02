@@ -2,9 +2,17 @@
 
 
 ## [Unreleased] - unreleased
+### Fixed
+- Better fine grain execution of tasks that may emit in bulk.
+
 ### Added
 - Buffering mode.
 - Gathering mode.
+- `IOCell.append_tier` which adds a tier who sources the last added tier like
+  a pipe.
+
+### Removed
+- `IOCell.tier_coroutine` is now implicitly handled by `IOCell.tier`.
 
 
 ## [1] - 2015-11-15

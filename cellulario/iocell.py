@@ -51,7 +51,7 @@ class IOCell(object):
 
     Think of this as a portable IO loop that's wrapped up and managed for the
     context of a single generator to the outside world.  The calling code
-    will work in a normal blocking fashion (more or less). """
+    will work in normal blocking style. """
 
     Tier = tier.Tier
 
@@ -109,10 +109,16 @@ class IOCell(object):
         single value or a list of either `Tier` types or coroutine functions
         already added to a `Tier` via `add_tier`. """
         self.assertNotFinalized()
+        assert asyncio.iscoroutinefunction(coro)
         tier = self.Tier(self, coro, **kwargs)
         self.tiers.append(tier)
         self.tiers_coro_map[coro] = tier
         return tier
+
+    def append_tier(self, coro, **kwargs):
+        """ Implicitly source from the tail tier like a pipe. """
+        source = self.tiers[-1] if self.tiers else None
+        return self.add_tier(coro, source=source, **kwargs)
 
     def add_cleaner(self, coro):
         """ Add a coroutine to run after the cell is done.  This is for the
@@ -120,24 +126,19 @@ class IOCell(object):
         self.assertNotFinalized()
         self.cleaners.append(coro)
 
-    def tier(self, *args, **kwargs):
-        """ Function decorator for a tier cororoutine. """
+    def tier(self, *args, append=True, source=None, **kwargs):
+        """ Function decorator for a tier coroutine.  If the function being
+        decorated is not already a coroutine function it will be wrapped. """
         if len(args) == 1 and not kwargs and callable(args[0]):
             raise TypeError('Uncalled decorator syntax is invalid')
 
         def decorator(coro):
-            self.add_tier(coro, *args, **kwargs)
-            return coro
-        return decorator
-
-    def tier_coroutine(self, *args, **kwargs):
-        """ Combination of the `tier` decorator and asyncio.coroutine. """
-        if len(args) == 1 and not kwargs and callable(args[0]):
-            raise TypeError('Uncalled decorator syntax is invalid')
-
-        def decorator(fn):
-            coro = asyncio.coroutine(fn)
-            self.add_tier(coro, *args, **kwargs)
+            if not asyncio.iscoroutinefunction(coro):
+                coro = asyncio.coroutine(coro)
+            if append and source is None:
+                self.append_tier(coro, *args, **kwargs)
+            else:
+                self.add_tier(coro, *args, source=source, **kwargs)
             return coro
         return decorator
 
