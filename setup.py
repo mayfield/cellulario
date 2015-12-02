@@ -16,7 +16,7 @@ def long_desc():
 
 setup(
     name='cellulario',
-    version='1.2',
+    version='2',
     description='Cellular IO',
     author='Justin Mayfield',
     author_email='tooker@gmail.com',
