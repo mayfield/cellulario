@@ -144,12 +144,10 @@ class IOCell(object):
 
     def cleaner(self, coro):
         """ Function decorator for a cleanup cororoutine. """
+        if not asyncio.iscoroutinefunction(coro):
+            coro = asyncio.coroutine(coro)
         self.add_cleaner(coro)
         return coro
-
-    def cleaner_coroutine(self, fn):
-        """ Combination of the `cleaner` decorator and asyncio.coroutine. """
-        return self.cleaner(asyncio.coroutine(fn))
 
     def finalize(self):
         """ Look at our tiers and setup the final data flow.  Once this is run
