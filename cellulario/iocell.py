@@ -9,6 +9,8 @@ import threading
 import warnings
 from . import coordination, tier
 
+DEBUG = False
+
 
 class IOCellEventLoopPolicy(type(asyncio.get_event_loop_policy())):
     """ This event loop policy is used during the context of an iocell
@@ -55,7 +57,7 @@ class IOCell(object):
 
     Tier = tier.Tier
 
-    def __init__(self, coord='noop', debug=True):
+    def __init__(self, coord='noop', debug=DEBUG):
         if isinstance(coord, coordination.AbstractCellCoordinator):
             self.coord = coord
         else:

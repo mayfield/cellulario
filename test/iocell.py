@@ -5,12 +5,8 @@ AsyncIOGenerator tests.
 import asyncio
 import operator
 import unittest
-from cellulario import IOCell as _IOCell
+from cellulario import IOCell
 from unittest import mock
-
-
-def IOCell(*args, debug=True, **kwargs):
-    return _IOCell(*args, debug=debug, **kwargs)
 
 
 class NoFinal(unittest.TestCase):
