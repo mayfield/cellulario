@@ -1,6 +1,13 @@
 """
-Some API handling code.  Predominantly this is to centralize common
-alterations we make to API calls, such as filtering by router ids.
+A cell (biology) like bounding of an event loop.  An IOCell contains its own
+event loop and provides some simplified entry and exit points for doing spurts
+of async operations in a classical (blocking) system.  The cells can
+communicate to each other as well for, `async_things | more_async_things`
+flows.
+
+This is sort of like loop.run_until_complete on steroids.  It tracks a cluster
+of async operations and allows them to emit values to the user as they are made
+available.  See the `Tier` code for a detailed explanation.
 """
 
 import asyncio
@@ -13,8 +20,8 @@ DEBUG = False
 
 
 class IOCellEventLoopPolicy(type(asyncio.get_event_loop_policy())):
-    """ This event loop policy is used during the context of an iocell
-    operation to ensure calls to get_event_loop return the iocell's event
+    """ This event loop policy is used during the context of an IOCell
+    operation to ensure calls to get_event_loop return the IOCell's event
     loop. """
 
     def __init__(self, loop):
@@ -30,7 +37,7 @@ class IOCellEventLoopPolicy(type(asyncio.get_event_loop_policy())):
         self.elp_save = None
 
     def set_event_loop(self):
-        raise RuntimeError('Setting event loop in iocell context is invalid')
+        raise RuntimeError('Setting event loop in IOCell context is invalid')
 
     def get_event_loop(self):
         return self._iocell_loop
@@ -73,7 +80,7 @@ class IOCell(object):
         self.init_event_loop()
 
     def init_event_loop(self):
-        """ Every cell should have its own ioloop for proper containment.
+        """ Every cell should have its own event loop for proper containment.
         The type of event loop is not so important however. """
         self.loop = asyncio.new_event_loop()
         self.loop.set_debug(self.debug)
@@ -145,7 +152,7 @@ class IOCell(object):
         return decorator
 
     def cleaner(self, coro):
-        """ Function decorator for a cleanup cororoutine. """
+        """ Function decorator for a cleanup coroutine. """
         if not asyncio.iscoroutinefunction(coro):
             coro = asyncio.coroutine(coro)
         self.add_cleaner(coro)
