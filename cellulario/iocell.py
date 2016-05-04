@@ -244,7 +244,8 @@ class IOCell(object):
         if self.closed:
             return
         self.closed = True
-        self.coord.close_wrap()
+        if self.finalized:
+            self.coord.close_wrap()
         self.cleanup_event_loop()
         for x in self.tiers:
             x.close()
