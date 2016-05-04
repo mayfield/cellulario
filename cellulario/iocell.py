@@ -84,9 +84,16 @@ class IOCell(object):
         The type of event loop is not so important however. """
         self.loop = asyncio.new_event_loop()
         self.loop.set_debug(self.debug)
-        self.loop._set_coroutine_wrapper(self.debug)
+        if hasattr(self.loop, '_set_coroutine_wrapper'):
+            self.loop._set_coroutine_wrapper(self.debug)
+        elif self.debug:
+            warnings.warn("Cannot set debug on loop: %s" % self.loop)
         self.loop_policy = IOCellEventLoopPolicy(self.loop)
-        self.loop_exception_handler_save = self.loop._exception_handler
+        if not hasattr(self.loop, '_exception_handler'):
+            warnings.warn("Cannot save exception handler for: %s" % self.loop)
+            self.loop_exception_handler_save = None
+        else:
+            self.loop_exception_handler_save = self.loop._exception_handler
         self.loop.set_exception_handler(self.loop_exception_handler)
 
     def cleanup_event_loop(self):
@@ -200,11 +207,15 @@ class IOCell(object):
 
     def event_loop(self):
         """ Run the event loop once. """
-        self.loop._thread_id = threading.get_ident()
-        try:
-            self.loop._run_once()
-        finally:
-            self.loop._thread_id = None
+        if hasattr(self.loop, '._run_once'):
+            self.loop._thread_id = threading.get_ident()
+            try:
+                self.loop._run_once()
+            finally:
+                self.loop._thread_id = None
+        else:
+            self.loop.call_soon(self.loop.stop)
+            self.loop.run_forever()
 
     def _output(self, starters):
         for x in starters:
