@@ -35,4 +35,4 @@ Installation
 Compatibility
 --------
 
-* Python 3.5+
+* Python 3.5.3+

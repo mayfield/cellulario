@@ -1,4 +1,4 @@
 from cellulario import iocell
 
-iocell.DEBUG = True
+iocell.DEBUG = False
 

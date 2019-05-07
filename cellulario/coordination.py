@@ -27,27 +27,23 @@ class AbstractCellCoordinator(object):
         """ Perform any cleanup following a cell lifecycle completion. """
         pass
 
-    @asyncio.coroutine
-    def flush(self, tier):
+    async def flush(self, tier):
         """ A regulator for buffered tiers.  Should return True to instruct
         the source tier to flush it's buffered results to the destination
         tiers. """
         pass
 
-    @asyncio.coroutine
-    def enqueue(self, tier):
-        """ Subclasses should pause here to prevent enqueuing more work.  Note
+    async def enqueue(self, tier):
+        """ Subclasses should pause here to prevent enqueuing more jobs.  Note
         that this means the source tier is the code to be blocked by this. """
         pass
 
-    @asyncio.coroutine
-    def start(self, tier):
+    async def start(self, tier):
         """ Subclasses should pause here if a tier is not permitted to start
         yet. """
         pass
 
-    @asyncio.coroutine
-    def finish(self, tier):
+    async def finish(self, tier):
         """ Subclasses should pause here if a tier is not permitted to finish
         yet. """
         pass
@@ -58,8 +54,7 @@ class NoopCoordinator(AbstractCellCoordinator):
 
     name = 'noop'
 
-    @asyncio.coroutine
-    def flush(self, tier):
+    async def flush(self, tier):
         """ Disable buffering by always instructing a flush to happen. """
         return True
 
@@ -83,15 +78,13 @@ class PoolCellCoordinator(AbstractCellCoordinator):
     def close(self):
         self.pools.clear()
 
-    @asyncio.coroutine
-    def start(self, tier):
+    async def start(self, tier):
         sem = self.pools.get(tier)
         if sem is None:
             return
-        yield from sem.acquire()
+        await sem.acquire()
 
-    @asyncio.coroutine
-    def finish(self, tier):
+    async def finish(self, tier):
         sem = self.pools.get(tier)
         if sem is None:
             return

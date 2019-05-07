@@ -7,7 +7,6 @@ for setting off the assertions in asyncio code that fire when their objects
 are deleted.
 """
 
-
 import asyncio
 import gc
 import unittest
@@ -37,8 +36,8 @@ class CollectWithoutGC(unittest.TestCase):
                 pass
             thing = Thing()
             @cell.tier()
-            def tier(r):
-                yield from r.emit(thing)
+            async def tier(r):
+                await r.emit(thing)
             return cell
         c = wrap()
         ref = weakref.ref(c)
@@ -55,12 +54,12 @@ class CollectWithoutGC(unittest.TestCase):
             thing1.thing2 = Thing()
             thing1.thing2.thing1 = thing1
             @cell.tier()
-            def tier1(r):
+            async def tier1(r):
                 thing1.hello = 'world'
-                yield from r.emit(thing1)
+                await r.emit(thing1)
             @cell.tier(source=tier1)
-            def tier2(r, thing):
-                yield from r.emit(thing)
+            async def tier2(r, thing):
+                await r.emit(thing)
             return cell
         c = wrap()
         cellref = weakref.ref(c)
@@ -74,3 +73,23 @@ class CollectWithoutGC(unittest.TestCase):
         ref = weakref.ref(t)
         del t
         self.assertIsNone(ref())
+
+
+class Cleanup(unittest.TestCase):
+
+    def test_cleaner(self):
+        cell = IOCell()
+
+        @cell.tier()
+        async def coro(route):
+            await route.emit(1)
+        cleaned = False
+
+        @cell.cleaner
+        async def cleaner():
+            nonlocal cleaned
+            cleaned = True
+
+        self.assertEqual(list(cell), [1])
+        self.assertTrue(cleaned)
+
