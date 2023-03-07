@@ -73,7 +73,7 @@ class PoolCellCoordinator(AbstractCellCoordinator):
             elif size == 0:
                 raise ValueError('Pool size of 0 is invalid: %s' % tier)
             else:
-                self.pools[tier] = asyncio.Semaphore(size, loop=cell.loop)
+                self.pools[tier] = asyncio.Semaphore(size)
 
     def close(self):
         self.pools.clear()

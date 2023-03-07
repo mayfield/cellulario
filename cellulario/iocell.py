@@ -17,12 +17,6 @@ from . import coordination, tier
 
 DEBUG = False
 
-if hasattr(asyncio, 'all_tasks'):
-    # python3.7+
-    all_tasks=asyncio.all_tasks
-else:
-    all_tasks=asyncio.Task.all_tasks
-
 
 class IOCellEventLoopPolicy(type(asyncio.get_event_loop_policy())):
     """ This event loop policy is used during the context of an IOCell
@@ -84,7 +78,7 @@ class IOCell(object):
         self.cleaners = []
         self.finalized = False
         self.init_event_loop()
-        self.output_event = asyncio.Event(loop=self.loop)
+        self.output_event = asyncio.Event()
 
     def init_event_loop(self):
         """ Every cell should have its own event loop for proper containment.
@@ -97,7 +91,7 @@ class IOCell(object):
 
     def cleanup_event_loop(self):
         """ Cleanup an event loop and close it down forever. """
-        for task in all_tasks(loop=self.loop):
+        for task in asyncio.all_tasks(loop=self.loop):
             if not task.done():
                 if self.debug and not self.interrupted:
                     warnings.warn('Cancelling task: %s' % task)
@@ -116,7 +110,7 @@ class IOCell(object):
         return coordination.coordinators[name]()
 
     def done(self):
-        return all(x.done() for x in all_tasks(loop=self.loop))
+        return all(x.done() for x in asyncio.all_tasks(loop=self.loop))
 
     def assertNotFinalized(self):
         """ Ensure the cell is not used more than once. """
@@ -248,7 +242,7 @@ class IOCell(object):
     async def clean(self):
         """ Run all of the cleaners added by the user. """
         if self.cleaners:
-            await asyncio.wait([x() for x in self.cleaners], loop=self.loop)
+            await asyncio.wait([asyncio.create_task(x()) for x in self.cleaners])
 
     def close(self):
         if self.closed:
